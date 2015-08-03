@@ -1,0 +1,63 @@
+.TH FTW 3 2015-08-03 "" ""
+.SH NAME
+pftw \- parallel file tree walk
+.SH SYNOPSIS
+.nf
+.B #include <pftw.h>
+
+.BI "int pftw_init(int " num_threads ");"
+
+.BI "int pftw(const char *" dirpath ,
+.BI "        int (*" fn ") (const char *" fpath ", const struct stat *" sb ,
+.BI "                   int " typeflag ", struct FTW *" ftwbuf ", void *" arg ),
+.BI "        int " nopenfd ", int " flags ", void *" arg );
+
+.BI "int pftw_deinit();"
+
+.SH DESCRIPTION
+
+.BR pftw ()
+does the same as 
+.BR nftw (3),
+but in parallel threads [based on
+.BR pthreads (7)].
+The additional argument
+.I arg
+is just an arbitrary user-defined argument. Before running
+.BR pftw ()
+it's required to run
+.BR pftw_init () where
+.I num_threads
+is a number of workers threads for
+.BR pftw ().
+
+.BR pftw ()
+may be useful as
+.BR nftw ()
+replacement for distributed file systems (like 
+.BR ceph )
+to bypass performance issues due to high latencies.
+
+.SH RETURN VALUE
+Functions
+.BR pftw_init ()
+and
+.BR pftw_deinit ()
+returns 0 on success and
+.I errno
+if an error occurs.
+
+.BR pftw ()
+returns the same values as
+.BR nftw ().
+
+.SH AUTHOR
+Dmitry Yu Okunev <dyokunev@ut.mephi.ru> 0x8E30679C
+
+.SH SUPPORT
+You can get support on IRC-channel in Freenode "#clsync" or on
+github's issue tracking system of the libpftw repository
+.IR https://github.com/xaionaro/libpftw .
+
+.SH SEE ALSO
+.BR nftw (3)
