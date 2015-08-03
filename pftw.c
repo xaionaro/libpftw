@@ -400,12 +400,15 @@ int pftw_dotask(pftw_task_t *task) {
 	pftw_queue_t *queue = task->queue;
 
 	if (task->stat.st_nlink == 0) {	// If stat() is not done, yet
+		int rc;
 		int flags = queue->flags;
 
 		if (flags & FTW_PHYS)
-			lstat(task->dirpath, &task->stat);
+			rc = lstat(task->dirpath, &task->stat);
 		else 
-			stat (task->dirpath, &task->stat);
+			rc = stat (task->dirpath, &task->stat);
+		if (rc)
+			return rc;
 	}
 
 	while (1) {
@@ -461,6 +464,8 @@ int pftw(const char *dirpath, pftw_callback_t fn, int nopenfd, int flags, void *
 
 
 void pftw_worker_dash(int worker_id) {
+	printf("pftw_worker_dash(%i)\n", worker_id);
+
 	pftw_queue_t *queue;
 	if (queues_count == 0) {
 		return;
