@@ -93,7 +93,7 @@ static inline int alsolock_queue(pftw_queue_t *queue) {
 	int i = 0;
 	while (i < queues_count)
 		if (queues[i] == queue) {
-			printf("lock %p\n", queue->lock);
+			printf("lock %p\n", queue);
 			pthread_mutex_lock(&queue->lock);
 			return 0;
 		}
@@ -106,7 +106,7 @@ static inline int lock_queue(pftw_queue_t *queue) {
 }
 
 static inline void unlock_queue(pftw_queue_t *queue) {
-	printf("unlock %p\n", queue->lock);
+	printf("unlock %p\n", queue);
 	pthread_mutex_unlock(&queue->lock);
 	unlock_queues();
 	return;
@@ -276,14 +276,25 @@ pftw_task_t *pftw_poptask(pftw_queue_t *queue) {
 	max_key.difficulty = ~0;
 
 	void *found = tfind(&max_key, &queue->tasks_btree, tasks_difficultycmp_findmax);	// Searching for the most difficult task
-
+/*
 	if (found == NULL) {
 		unlock_queue(queue);
 		fprintf(stderr, "Unknown internal error #2 of ftw()\n");
 		return NULL;
-	}
+	}*/
 
 	max = max_key.max;
+
+	found = tdelete(max, &queue->tasks_btree, tasks_difficultycmp);
+	if (found == NULL) {
+		unlock_queue(queue);
+		fprintf(stderr, "Unknown internal error #4 of ftw()\n");
+		return NULL;
+	}
+
+	size_t task_inqueueid = (max - queue->tasks) / sizeof(*max);
+
+	memcpy(&queue->tasks[task_inqueueid], &queue->tasks[--queue->tasks_count], sizeof(*queue->tasks));
 
 	unlock_queue(queue);
 
@@ -298,21 +309,7 @@ int pftw_dotask_processentry(pftw_task_t *task, struct dirent *entry_p) {
 	int flags = queue->flags;
 	int rc;
 
-	if (flags & FTW_PHYS)
-		rc = lstat(entry_p->d_name, &st);
-	else 
-		rc = stat (entry_p->d_name, &st);
-
-	if (rc)	return rc;
-
-	// TODO: check for recursion
-
-	char follow = (entry_p->d_type == DT_DIR);
-
-	if (flags & FTW_MOUNT)
-		if (task->stat.st_dev != st.st_dev)
-			follow = 0;
-
+	// Getting path
 	size_t entry_d_name_len = strlen(entry_p->d_name);
 
 	size_t path_len = task->dirpath_len + 1 + entry_d_name_len;
@@ -322,6 +319,23 @@ int pftw_dotask_processentry(pftw_task_t *task, struct dirent *entry_p) {
 	path[task->dirpath_len] = '/';
 	memcpy(&path[task->dirpath_len + 1], entry_p->d_name, entry_d_name_len);
 	path[path_len] = 0;
+
+	// Getting stat
+
+	if (flags & FTW_PHYS)
+		rc = lstat(path, &st);
+	else 
+		rc = stat (path, &st);
+
+	if (rc)	return errno;
+
+	// TODO: check for recursion
+
+	char follow = (entry_p->d_type == DT_DIR);
+
+	if (flags & FTW_MOUNT)
+		if (task->stat.st_dev != st.st_dev)
+			follow = 0;
 
 	int ftw_ftype = FTW_NS;
 	switch (entry_p->d_type) {
