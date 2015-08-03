@@ -414,6 +414,9 @@ int pftw_dotask(pftw_task_t *task) {
 		if (readdir_result == NULL)
 			break;
 
+		if (entry.d_name[0] == '.' && (entry.d_name[1] == 0 || (entry.d_name[1] == '.' && entry.d_name[2] == 0)))
+			continue;	// Skip "." and ".."
+
 		rc = pftw_dotask_processentry(task, &entry);
 		if (rc) return rc;
 	}
