@@ -37,7 +37,7 @@ debug:
 
 
 clean:
-	rm -f $(binary) *.o
+	rm -f $(binary) *.o test
 
 distclean: clean
 
@@ -58,4 +58,10 @@ endif
 
 deinstall:
 	rm -f "$(INSTDIR)"/bin/$(binary)
+
+test: all
+	$(CC) -O3 test.c -lpftw -L. -o test
+
+dotest: test
+	LD_LIBRARY_PATH=. strace -f ./test
 

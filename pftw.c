@@ -546,7 +546,8 @@ int pftw_deinit() {
 		// Interrupting sem_wait()
 		i = 0;
 		while (i < threads_count) {
-			int ret = pthread_kill(threads[i], SIGCONT);
+//			int ret = pthread_kill(threads[i], SIGCONT);
+			int ret = sem_post(&threads_sem);
 			if (ret)
 				return ret;
 			i++;
