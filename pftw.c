@@ -49,6 +49,7 @@ struct pftw_task {
 typedef struct pftw_task pftw_task_t;
 
 struct pftw_queue {
+	int		 id;
 	pftw_task_t	 tasks[PFTW_MAX_QUEUE_LENGTH];
 	void		*tasks_btree;
 	int		 tasks_count;
@@ -58,145 +59,47 @@ struct pftw_queue {
 	int		 flags;
 	void		*arg;
 	pthread_mutex_t	 lock;
+	int		 worker_id;
 };
 typedef struct pftw_queue pftw_queue_t;
 
-pthread_t *threads       = NULL;
-int        threads_count = 0;
-sem_t      threads_sem;
+pthread_t	 *threads	 = NULL;
+int		  threads_count	 = 0;
+sem_t		  threads_sem;
+pftw_queue_t	**thread_queue	 = NULL;
+pftw_queue_t	**queues	 = NULL;
+int		  queues_count	 = 0;
+int		  queues_alloced = 0;
+pthread_mutex_t	  queues_lock	 = PTHREAD_MUTEX_INITIALIZER;
 
 /*
 pftw_queue_t	*queues  = NULL;
 int		 queues_count   = 0;
-int		 queues_alloced = 0;
-pthread_mutex_t	 queues_lock = PTHREAD_MUTEX_INITIALIZER;
 */
-
-void pftw_worker_dash() {
-	
-}
-
-void *pftw_worker(void *arg) {
-	int ret;
-
-	while (pftw_running) {
-		ret = sem_wait(&threads_sem);
-		if (ret) {
-			pftw_running = 0;
-			fprintf(stderr, "pftw internal error #0: %s\n", strerror(errno));
-			return (void *)(long)errno;
-		}
-		pftw_worker_dash();
-		ret = sem_post(&threads_sem);
-		if (ret) {
-			pftw_running = 0;
-			fprintf(stderr, "pftw internal error #1: %s\n", strerror(errno));
-			return (void *)(long)errno;
-		}
-	}
-
-	return NULL;
-}
-
-int pftw_init(int num_threads) {
-
-	if (num_threads < 2)
-		return EINVAL;
-
-	if (num_threads > PFTW_MAX_THREADS)
-		return EINVAL;
-
-	num_threads--;	// One thread is the master thread [pftw()]
-
-	if (pftw_running) {
-		return EBUSY;
-	}
-
-	threads = calloc(num_threads, sizeof(pthread_t));
-
-	if (threads == NULL)
-		return ENOMEM;
-
-	int ret = sem_init(&threads_sem, 0, num_threads);
-	if (ret) {
-		free(threads);
-		return errno;
-	}
-
-	pftw_running = 1;
-
-	{
-		int i = 0;
-		while (i < num_threads) {
-			pthread_create(&threads[i], NULL, pftw_worker, NULL);
-
-			i++;
-		}
-
-		threads_count = num_threads;
-	}
-
-	return 0;
-}
-
-int pftw_deinit() {
-	if (!pftw_running)
-		return ENOENT;
-
-	// No more iterations for pftw workers
-	pftw_running = 0;
-
-	{
-		int i;
-
-		// Interrupting sem_wait()
-		i = 0;
-		while (i < threads_count) {
-			int ret = pthread_kill(threads[i], SIGCONT);
-			if (ret)
-				return ret;
-			i++;
-		}
-
-		// Waiting for finish
-		i = 0;
-		while (i < threads_count) {
-			int ret;
-			void *retval;
-			ret = pthread_join(threads[i], &retval);
-			if (ret)
-				return ret;
-			i++;
-		}
-	}
-
-	// Clean up
-	free(threads);
-	threads		= NULL;
-	threads_count	= 0;
-/*
-	free(queues);
-	queues		= NULL;
-	queues_count	= 0;
-	queues_alloced	= 0;
-*/
-	return sem_destroy(&threads_sem);
-}
 
 static inline void lock_queues() {
-	//pthread_mutex_lock(&queues_lock);
+	pthread_mutex_lock(&queues_lock);
 	return;
 }
 
 static inline void unlock_queues() {
-	//pthread_mutex_unlock(&queues_lock);
+	pthread_mutex_unlock(&queues_lock);
 	return;
 }
 
-static inline void lock_queue(pftw_queue_t *queue) {
+static inline int alsolock_queue(pftw_queue_t *queue) {
+	int i = 0;
+	while (i < queues_count)
+		if (queues[i] == queue) {
+			pthread_mutex_lock(&queue->lock);
+			return 0;
+		}
+	return ENOENT;
+}
+
+static inline int lock_queue(pftw_queue_t *queue) {
 	lock_queues();
-	pthread_mutex_lock(&queue->lock);
-	return;
+	return alsolock_queue(queue);
 }
 
 static inline void unlock_queue(pftw_queue_t *queue) {
@@ -207,12 +110,12 @@ static inline void unlock_queue(pftw_queue_t *queue) {
 
 pftw_queue_t *pftw_newqueue(pftw_callback_t callback, int nopenfd, int flags, void *arg) {
 	lock_queues();
-/*
+
 	int queue_id = queues_count;
 
 	if (queue_id >= queues_alloced) {
 		queues_alloced += PFTW_ALLOCPORTION;
-		queues		= realloc(queues, queues_alloced);
+		queues		= realloc(queues, queues_alloced*sizeof(*queues));
 
 		if (queues == NULL) {
 			unlock_queues();
@@ -222,12 +125,13 @@ pftw_queue_t *pftw_newqueue(pftw_callback_t callback, int nopenfd, int flags, vo
 
 	queues_count++;
 
-	pftw_queue_t *queue = &queues[queue_id];*/
-
 	pftw_queue_t *queue = malloc(sizeof(*queue));
 	if (queue == NULL)
 		return NULL;
 
+	queues[queue_id]	= queue;
+
+	queue->id		= queue_id;
 	queue->tasks_count	= 0;
 	queue->callback		= callback;
 	queue->nopenfd		= nopenfd;
@@ -253,7 +157,11 @@ int pftw_deletequeue(pftw_queue_t *queue) {
 
 	tdestroy(queue->tasks_btree, free);
 
-	//memcpy(queue, &queues[--queues_count], sizeof(*queue));
+	thread_queue[queue->worker_id] = NULL;
+
+	queues[queue->id]     = queues[--queues_count];
+	queues[queue->id]->id = queue->id;
+
 	free(queue);
 
 	unlock_queues();
@@ -287,7 +195,9 @@ static int tasks_difficultycmp(const void *_task_a, const void *_task_b) {
 }
 
 int pftw_pushtask(pftw_queue_t *queue, const char *dirpath, size_t dirpath_len, unsigned long difficulty) {
-	lock_queue(queue);
+	int rc = lock_queue(queue);
+	if (rc)
+		return (rc == ENOENT ? 0 : rc);
 
 	if (queue->tasks_count >= PFTW_MAX_QUEUE_LENGTH) {
 		unlock_queue(queue);
@@ -300,8 +210,16 @@ int pftw_pushtask(pftw_queue_t *queue, const char *dirpath, size_t dirpath_len, 
 	task->queue	  = queue;
 
 	// TODO: Remove this magic with the difficulty. It's just hacks to prevent key collision in the tree. First bits is a real difficulty. The last bits is just a task_id for the prevention.
-	unsigned long difficulty_overload_mask = ~((1 << (sizeof(difficulty)*8 - (PFTW_MAX_THREADS_BITS + PFTW_MAX_QUEUE_LENGTH_BITS))) - 1);
-	unsigned long difficulty_task_id_mask  =   (1 << (PFTW_MAX_THREADS_BITS + PFTW_MAX_QUEUE_LENGTH_BITS)) - 1;
+	int difficulty_bitpos_edge = PFTW_MAX_THREADS_BITS + PFTW_MAX_QUEUE_LENGTH_BITS;
+
+	unsigned long difficulty_overload_mask;
+	difficulty_overload_mask   = ~0;
+	difficulty_overload_mask <<= sizeof(difficulty)*8 - difficulty_bitpos_edge;
+
+	unsigned long difficulty_task_id_mask;
+	difficulty_task_id_mask    = ~0;
+	difficulty_task_id_mask  <<=  difficulty_bitpos_edge;
+	difficulty_task_id_mask    = ~difficulty_task_id_mask;
 
 	if (difficulty & difficulty_overload_mask)
 		task->difficulty = ~difficulty_task_id_mask;
@@ -331,11 +249,17 @@ int pftw_pushtask(pftw_queue_t *queue, const char *dirpath, size_t dirpath_len, 
 
 	unlock_queue(queue);
 
-	return 0;
+	return sem_post(&threads_sem);
 }
 
 pftw_task_t *pftw_poptask(pftw_queue_t *queue) {
-	lock_queue(queue);
+	int rc = lock_queue(queue);
+	if (rc) {
+		if (rc == ENOENT)
+			return NULL;
+		fprintf(stderr, "Unknown internal error #3 of ftw()\n");
+		return NULL;
+	}
 
 	if (queue->tasks_count <= 0) {
 		unlock_queue(queue);
@@ -510,5 +434,149 @@ int pftw(const char *dirpath, pftw_callback_t fn, int nopenfd, int flags, void *
 	if (rc) return rc;
 
 	return 0;
+}
+
+
+void pftw_worker_dash(int worker_id) {
+	pftw_queue_t *queue;
+	if (queues_count == 0) {
+		return;
+	}
+
+	queue = thread_queue[worker_id];
+
+	if (queue == NULL) {
+		lock_queues();
+
+		if (queues_count == 0) {
+			unlock_queues();
+			return;
+		}
+
+		thread_queue[worker_id]            = queues[worker_id % queues_count];
+		thread_queue[worker_id]->worker_id = worker_id;
+
+		queue = thread_queue[worker_id];
+
+		unlock_queues();
+	}
+
+	pftw_task_t *task = pftw_poptask(queue);
+
+	if (task != NULL) {
+		int rc = pftw_dotask(task);
+		if (rc) {
+			fprintf(stderr, "pftw internal error #1: %s\n", strerror(errno));
+			return;
+		}
+	}
+
+	return;
+}
+
+void *pftw_worker(void *_arg) {
+	int worker_id = (long)_arg;
+	int ret;
+
+	while (pftw_running) {
+		ret = sem_wait(&threads_sem);
+		if (ret) {
+			pftw_running = 0;
+			fprintf(stderr, "pftw internal error #0: %s\n", strerror(errno));
+			return (void *)(long)errno;
+		}
+		pftw_worker_dash(worker_id);
+	}
+
+	return NULL;
+}
+
+int pftw_init(int num_threads) {
+
+	if (num_threads < 2)
+		return EINVAL;
+
+	if (num_threads > PFTW_MAX_THREADS)
+		return EINVAL;
+
+	num_threads--;	// One thread is the master thread [pftw()]
+
+	if (pftw_running) {
+		return EBUSY;
+	}
+
+	threads		= calloc(num_threads, sizeof(pthread_t));
+	thread_queue	= calloc(num_threads, sizeof(void *));
+
+	if (threads == NULL)
+		return ENOMEM;
+
+	int ret = sem_init(&threads_sem, 0, num_threads);
+	if (ret) {
+		free(threads);
+		return errno;
+	}
+
+	pftw_running = 1;
+
+	{
+		int i = 0;
+		while (i < num_threads) {
+			pthread_create(&threads[i], NULL, pftw_worker, (void *)(long)i);
+
+			i++;
+		}
+
+		threads_count = num_threads;
+	}
+
+	return 0;
+}
+
+int pftw_deinit() {
+	if (!pftw_running)
+		return ENOENT;
+
+	// No more iterations for pftw workers
+	pftw_running = 0;
+
+	{
+		int i;
+
+		// Interrupting sem_wait()
+		i = 0;
+		while (i < threads_count) {
+			int ret = pthread_kill(threads[i], SIGCONT);
+			if (ret)
+				return ret;
+			i++;
+		}
+
+		// Waiting for finish
+		i = 0;
+		while (i < threads_count) {
+			int ret;
+			void *retval;
+			ret = pthread_join(threads[i], &retval);
+			if (ret)
+				return ret;
+			i++;
+		}
+	}
+
+	// Clean up
+	free(threads);
+	threads		= NULL;
+	threads_count	= 0;
+
+	free(thread_queue);
+	thread_queue	= NULL;
+
+	free(queues);
+	queues		= NULL;
+	queues_count	= 0;
+	queues_alloced	= 0;
+
+	return sem_destroy(&threads_sem);
 }
 
