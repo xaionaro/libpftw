@@ -517,6 +517,7 @@ void *pftw_worker(void *_arg) {
 		}
 	}
 
+	printf("worker %i finished\n", worker_id);
 	return NULL;
 }
 
