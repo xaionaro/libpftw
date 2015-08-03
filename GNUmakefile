@@ -8,7 +8,7 @@ EXAMPLES ?= yes
 CSECFLAGS ?= -fstack-protector-all -Wall --param ssp-buffer-size=4 -D_FORTIFY_SOURCE=2 -fstack-check -DPARANOID -std=gnu99
 CFLAGS ?= -pipe -O2
 CFLAGS += $(CSECFLAGS) -fpic
-DEBUGCFLAGS ?= -pipe -Wall -Werror -ggdb3 -export-dynamic -Wno-error=unused-variable -O0 -pipe $(CSECFLAGS) -fpic
+DEBUGCFLAGS ?= -pipe -Wall -ggdb3 -export-dynamic -Wno-error=unused-variable -O0 -pipe $(CSECFLAGS) -fpic
 
 CARCHFLAGS ?= -march=native
 
@@ -63,5 +63,5 @@ test: all
 	$(CC) -O3 test.c -lpftw -L. -o test
 
 dotest: test
-	LD_LIBRARY_PATH=. strace -f ./test
+	LD_LIBRARY_PATH=. ./test
 

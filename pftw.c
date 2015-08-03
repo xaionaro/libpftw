@@ -78,11 +78,13 @@ int		 queues_count   = 0;
 */
 
 static inline void lock_queues() {
+	printf("lock queues\n");
 	pthread_mutex_lock(&queues_lock);
 	return;
 }
 
 static inline void unlock_queues() {
+	printf("unlock queues\n");
 	pthread_mutex_unlock(&queues_lock);
 	return;
 }
@@ -91,6 +93,7 @@ static inline int alsolock_queue(pftw_queue_t *queue) {
 	int i = 0;
 	while (i < queues_count)
 		if (queues[i] == queue) {
+			printf("lock %p\n", queue->lock);
 			pthread_mutex_lock(&queue->lock);
 			return 0;
 		}
@@ -103,6 +106,7 @@ static inline int lock_queue(pftw_queue_t *queue) {
 }
 
 static inline void unlock_queue(pftw_queue_t *queue) {
+	printf("unlock %p\n", queue->lock);
 	pthread_mutex_unlock(&queue->lock);
 	unlock_queues();
 	return;
@@ -237,7 +241,7 @@ int pftw_pushtask(pftw_queue_t *queue, const char *dirpath, size_t dirpath_len, 
 			return ENOMEM;
 		}
 
-		if (found != task) {	// TODO: Remove this. This is a hack to retry on key collision in the tree
+		if (found == task) {	// TODO: Remove this. This is a hack to retry on key collision in the tree
 			task->difficulty &= ~difficulty_task_id_mask;
 			task->difficulty |= queue->current_task_id++;
 			queue->current_task_id %= PFTW_MAX_QUEUE_LENGTH;
@@ -255,6 +259,7 @@ int pftw_pushtask(pftw_queue_t *queue, const char *dirpath, size_t dirpath_len, 
 pftw_task_t *pftw_poptask(pftw_queue_t *queue) {
 	int rc = lock_queue(queue);
 	if (rc) {
+		unlock_queue(queue);
 		if (rc == ENOENT)
 			return NULL;
 		fprintf(stderr, "Unknown internal error #3 of ftw()\n");
@@ -273,6 +278,7 @@ pftw_task_t *pftw_poptask(pftw_queue_t *queue) {
 	void *found = tfind(&max_key, &queue->tasks_btree, tasks_difficultycmp_findmax);	// Searching for the most difficult task
 
 	if (found == NULL) {
+		unlock_queue(queue);
 		fprintf(stderr, "Unknown internal error #2 of ftw()\n");
 		return NULL;
 	}
@@ -478,14 +484,15 @@ void *pftw_worker(void *_arg) {
 	int worker_id = (long)_arg;
 	int ret;
 
+	ret = sem_wait(&threads_sem);
 	while (pftw_running) {
+		pftw_worker_dash(worker_id);
 		ret = sem_wait(&threads_sem);
 		if (ret) {
 			pftw_running = 0;
 			fprintf(stderr, "pftw internal error #0: %s\n", strerror(errno));
 			return (void *)(long)errno;
 		}
-		pftw_worker_dash(worker_id);
 	}
 
 	return NULL;
