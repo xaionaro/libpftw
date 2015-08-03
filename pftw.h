@@ -20,6 +20,7 @@
 #include <sys/types.h>
 #include <sys/stat.h>
 #include <unistd.h>
+#include <ftw.h>
 
 #define PFTW_MAX_THREADS_BITS		8
 #define PFTW_MAX_QUEUE_LENGTH_BITS	2
@@ -30,7 +31,7 @@
 #define	PFTW_ALLOCPORTION	(1<<4)
 
 
-struct FTW;
+//struct FTW;
 
 typedef int (*pftw_callback_t) (
 	const char *fpath,
