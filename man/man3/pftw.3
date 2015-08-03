@@ -26,10 +26,17 @@ The additional argument
 is just an arbitrary user-defined argument. Before running
 .BR pftw ()
 it's required to run
-.BR pftw_init () where
+.BR pftw_init ()
+where
 .I num_threads
 is a number of workers threads for
 .BR pftw ().
+Argument
+.I nopenfd
+is ignored. Some
+.BR nftw (3)
+.I flags
+may be not supported.
 
 .BR pftw ()
 may be useful as
