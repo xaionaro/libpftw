@@ -38,10 +38,10 @@
 char pftw_running;
 
 struct pftw_task {
-	char		*dirpath;
-	size_t		 dirpath_len;
-	unsigned long	 difficulty;
-	struct stat	 stat;
+	char		dirpath[PATH_MAX];
+	size_t		dirpath_len;
+	unsigned long	difficulty;
+	struct stat	stat;
 
 	struct pftw_queue *queue;
 	struct pftw_task *max;
@@ -142,6 +142,7 @@ pftw_queue_t *pftw_newqueue(pftw_callback_t callback, int nopenfd, int flags, vo
 	queue->flags		= flags;
 	queue->tasks_btree	= NULL;
 	queue->arg		= arg;
+	queue->current_task_id	= 0;
 
 	pthread_mutex_init(&queue->lock, NULL);
 
@@ -173,14 +174,14 @@ int pftw_deletequeue(pftw_queue_t *queue) {
 }
 
 static int tasks_difficultycmp_findmax(const void *_task_a, const void *_task_b) {
-	const pftw_task_t *task_a = _task_a, *task_b = _task_b;
+	pftw_task_t *task_a = (pftw_task_t *)_task_a, *task_b = (pftw_task_t *)_task_b;
 
 	if (task_a->difficulty > task_b->difficulty) {
-		((pftw_task_t *)task_a)->max = (pftw_task_t *)task_b;
+		task_a->max = task_b;
 		return 1;
 	}
 	if (task_a->difficulty < task_b->difficulty) {
-		((pftw_task_t *)task_b)->max = (pftw_task_t *)task_a;
+		task_b->max = task_a;
 		return -1;
 	}
 
@@ -209,9 +210,10 @@ int pftw_pushtask(pftw_queue_t *queue, const char *dirpath, size_t dirpath_len, 
 	}
 
 	pftw_task_t *task = &queue->tasks[queue->tasks_count++];
-	task->dirpath     = strdup(dirpath);
+	strcpy(task->dirpath, dirpath);
 	task->dirpath_len = dirpath_len;
 	task->queue	  = queue;
+	memset(&task->stat, 0, sizeof(task->stat));
 
 	// TODO: Remove this magic with the difficulty. It's just hacks to prevent key collision in the tree. First bits is a real difficulty. The last bits is just a task_id for the prevention.
 	int difficulty_bitpos_edge = PFTW_MAX_THREADS_BITS + PFTW_MAX_QUEUE_LENGTH_BITS;
@@ -232,6 +234,8 @@ int pftw_pushtask(pftw_queue_t *queue, const char *dirpath, size_t dirpath_len, 
 
 	task->difficulty |= queue->current_task_id++;
 	queue->current_task_id %= PFTW_MAX_QUEUE_LENGTH;
+
+	printf("pftw_pushtask(): \"%s\" (%i): %lu\n", dirpath, queue->tasks_count, task->difficulty);
 
 
 	while (1) {
@@ -256,23 +260,24 @@ int pftw_pushtask(pftw_queue_t *queue, const char *dirpath, size_t dirpath_len, 
 	return sem_post(&threads_sem);
 }
 
-pftw_task_t *pftw_poptask(pftw_queue_t *queue) {
+int pftw_poptask(pftw_queue_t *queue, pftw_task_t *task) {
 	int rc = lock_queue(queue);
 	if (rc) {
 		unlock_queue(queue);
 		if (rc == ENOENT)
-			return NULL;
+			return ENOENT;
 		fprintf(stderr, "Unknown internal error #3 of ftw()\n");
-		return NULL;
+		return rc;
 	}
 
 	if (queue->tasks_count <= 0) {
 		unlock_queue(queue);
-		return NULL;
+		return ENOENT;
 	}
 
-	pftw_task_t max_key, *max;
+	pftw_task_t max_key = {{0}};
 
+	//strcpy(max_key.dirpath, "JUST A TEST");
 	max_key.difficulty = ~0;
 
 	void *found = tfind(&max_key, &queue->tasks_btree, tasks_difficultycmp_findmax);	// Searching for the most difficult task
@@ -283,25 +288,39 @@ pftw_task_t *pftw_poptask(pftw_queue_t *queue) {
 		return NULL;
 	}*/
 
-	max = max_key.max;
+	memcpy(task, max_key.max, sizeof(*task));
+	printf("pftw_poptask(): \"%s\": %lu\n", task->dirpath, task->difficulty);
 
-	found = tdelete(max, &queue->tasks_btree, tasks_difficultycmp);
+	found = tdelete(task, &queue->tasks_btree, tasks_difficultycmp);
 	if (found == NULL) {
-		unlock_queue(queue);
 		fprintf(stderr, "Unknown internal error #4 of ftw()\n");
-		return NULL;
+		unlock_queue(queue);
+		return ENOENT;
 	}
 
-	size_t task_inqueueid = (max - queue->tasks) / sizeof(*max);
+	size_t task_inqueueid = (max_key.max - queue->tasks) / sizeof(*task);
 
-	memcpy(&queue->tasks[task_inqueueid], &queue->tasks[--queue->tasks_count], sizeof(*queue->tasks));
+	--queue->tasks_count;
+	if (task_inqueueid != queue->tasks_count)
+		memcpy(&queue->tasks[task_inqueueid], &queue->tasks[queue->tasks_count], sizeof(*queue->tasks));
 
+	printf("pftw_poptask(): \"%s\" (%i)\n", task->dirpath, queue->tasks_count);
 	unlock_queue(queue);
-
-	return max;
+	return 0;
 }
 
 int pftw_dotask(pftw_task_t *task);
+
+int pftw_dotasknow(pftw_queue_t *queue, const char *path, size_t path_len, struct stat *st_p) {
+	pftw_task_t childtask;
+
+	strcpy(childtask.dirpath, path);
+	childtask.dirpath_len = path_len;
+	childtask.queue       = queue;
+	memcpy(&childtask.stat, st_p, sizeof(*st_p));
+
+	return pftw_dotask(&childtask);
+}
 
 int pftw_dotask_processentry(pftw_task_t *task, struct dirent *entry_p) {
 	struct stat st;
@@ -321,6 +340,8 @@ int pftw_dotask_processentry(pftw_task_t *task, struct dirent *entry_p) {
 	path[path_len] = 0;
 
 	// Getting stat
+
+	printf("pftw_dotask_processentry(): \"%s\"\n", path);
 
 	if (flags & FTW_PHYS)
 		rc = lstat(path, &st);
@@ -375,17 +396,14 @@ int pftw_dotask_processentry(pftw_task_t *task, struct dirent *entry_p) {
 	if (follow) {
 		int rc;
 		unsigned long difficulty = st.st_nlink;
+
 		if (difficulty >= PFTW_DIFFICULTY_THRESHOLD) {	// If the task is heavy then public it for workers
 			rc = pftw_pushtask(queue, path, path_len, difficulty);
+			if (rc == EBUSY) {
+				rc = pftw_dotasknow(queue, path, path_len, &st);
+			}
 		} else {					// Otherwise do the task by myself
-			pftw_task_t childtask;
-
-			childtask.dirpath     = path;
-			childtask.dirpath_len = path_len;
-			childtask.queue   = queue;
-			memcpy(&childtask.stat, &st, sizeof(st));
-
-			rc = pftw_dotask(&childtask);
+			rc = pftw_dotasknow(queue, path, path_len, &st);
 		}
 		if (rc) return rc;
 	}
@@ -395,9 +413,21 @@ int pftw_dotask_processentry(pftw_task_t *task, struct dirent *entry_p) {
 
 
 int pftw_dotask(pftw_task_t *task) {
+	printf("opendir(%s)\n", task->dirpath);
 	DIR *dir = opendir(task->dirpath);
-	struct dirent entry, *readdir_result;
 	pftw_queue_t *queue = task->queue;
+
+	if (dir == NULL) {
+		switch (errno) {
+			case EACCES:
+				queue->callback(task->dirpath, &task->stat, FTW_DNR, NULL, queue->arg);
+				return 0;
+			default:
+				return errno;
+		}
+	}
+
+	struct dirent entry, *readdir_result;
 
 	if (task->stat.st_nlink == 0) {	// If stat() is not done, yet
 		int rc;
@@ -426,8 +456,6 @@ int pftw_dotask(pftw_task_t *task) {
 
 	closedir(dir);
 
-	free(task->dirpath);
-
 	return 0;
 }
 
@@ -448,13 +476,17 @@ int pftw(const char *dirpath, pftw_callback_t fn, int nopenfd, int flags, void *
 		return errno;
 
 	int rc = pftw_pushtask(queue, dirpath, strlen(dirpath), ~0);
+	if (rc == EBUSY) {
+		fprintf(stderr, "This case is not implemented, yet\n");
+	}
 	if (rc) return rc;
 
-	pftw_task_t *task;
-	while ((task = pftw_poptask(queue)) != NULL) {
-		rc = pftw_dotask(task);
+	pftw_task_t task;
+	while ((rc = pftw_poptask(queue, &task)) == 0) {
+		rc = pftw_dotask(&task);
 		if (rc) return rc;
 	}
+	if (rc) return rc;
 
 	rc = pftw_deletequeue(queue);
 	if (rc) return rc;
@@ -489,14 +521,18 @@ void pftw_worker_dash(int worker_id) {
 		unlock_queues();
 	}
 
-	pftw_task_t *task = pftw_poptask(queue);
-
-	if (task != NULL) {
-		int rc = pftw_dotask(task);
+	pftw_task_t task;
+	int rc = pftw_poptask(queue, &task);
+	if (!rc) {
+		rc = pftw_dotask(&task);
 		if (rc) {
 			fprintf(stderr, "pftw internal error #1: %s\n", strerror(errno));
 			return;
 		}
+	} else
+	if (rc != ENOENT) {
+		fprintf(stderr, "pftw internal error #5: %s\n", strerror(errno));
+		return;
 	}
 
 	return;
@@ -508,7 +544,7 @@ void *pftw_worker(void *_arg) {
 
 	ret = sem_wait(&threads_sem);
 	while (pftw_running) {
-		pftw_worker_dash(worker_id);
+		//pftw_worker_dash(worker_id);
 		ret = sem_wait(&threads_sem);
 		if (ret) {
 			pftw_running = 0;
