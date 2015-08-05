@@ -62,6 +62,10 @@ deinstall:
 test: all
 	$(CC) -O3 test.c -lpftw -L. -o test
 
+debugtest: debug
+	$(CC) -O0 -ggdb test.c -lpftw -L. -o test
+
+
 dotest: test
 	LD_LIBRARY_PATH=. ./test
 

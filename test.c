@@ -20,6 +20,7 @@
 #define _GNU_SOURCE
 
 #include <stdio.h>
+#include <string.h>
 
 #include "pftw.h"
 
@@ -31,15 +32,16 @@ int cb_print(
 	struct FTW *ftwbuf,
 	void *arg)
 {
-	printf("Path: %s\n", fpath);
+
+	printf("%s\n", fpath);
 
 	return FTW_CONTINUE;
 }
 
 int main() {
-	printf("pftw_init(8) -> %i\n", pftw_init(8));
-	printf("pftw() -> %i\n", pftw("/var", cb_print, 0, FTW_PHYS|FTW_ACTIONRETVAL, NULL));
-	printf("pftw_deinit() -> %i\n", pftw_deinit());
+	fprintf(stderr, "pftw_init(8) -> %i\n", pftw_init(8));
+	fprintf(stderr, "pftw() -> %i\n", pftw("/var", cb_print, 0, FTW_PHYS|FTW_ACTIONRETVAL, NULL));
+	fprintf(stderr, "pftw_deinit() -> %i\n", pftw_deinit());
 
 	return 0;
 }
