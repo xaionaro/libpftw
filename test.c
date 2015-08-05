@@ -25,24 +25,47 @@
 #include "pftw.h"
 
 
-int cb_print(
+int cb_print_pftw(
 	const char *fpath,
 	const struct stat *sb,
 	int typeflag,
 	struct FTW *ftwbuf,
 	void *arg)
 {
+	return cb_print_ftw(fpath, sb, typeflag, ftwbuf);
+}
 
+int cb_print_ftw(
+	const char *fpath,
+	const struct stat *sb,
+	int typeflag,
+	struct FTW *ftwbuf)
+{
 	printf("%s\n", fpath);
 
 	return FTW_CONTINUE;
 }
 
-int main() {
-	fprintf(stderr, "pftw_init(8) -> %i\n", pftw_init(8));
-	fprintf(stderr, "pftw() -> %i\n", pftw("/var", cb_print, 0, FTW_PHYS|FTW_ACTIONRETVAL, NULL));
-	fprintf(stderr, "pftw_deinit() -> %i\n", pftw_deinit());
+int syntax(char *argv[]) {
+	fprintf(stderr, "syntax: %s <pftw|nftw> <directory>\n", argv[0]);
+	return -1;
+}
 
-	return 0;
+int main(int argc, char *argv[]) {
+	if (argc < 3)
+		return syntax(argv);
+
+	if (!strcmp(argv[1], "pftw")) {
+		fprintf(stderr, "pftw_init(8) -> %i\n", pftw_init(8));
+		fprintf(stderr, "pftw() -> %i\n", pftw(argv[2], cb_print_pftw, 0, FTW_PHYS|FTW_ACTIONRETVAL, NULL));
+		fprintf(stderr, "pftw_deinit() -> %i\n", pftw_deinit());
+		return 0;
+	} else
+	if (!strcmp(argv[1], "nftw")) {
+		fprintf(stderr, "nftw() -> %i\n", nftw(argv[2], cb_print_ftw, 0, FTW_PHYS|FTW_ACTIONRETVAL));
+		return 0;
+	}
+
+	return syntax(argv);
 }
 
