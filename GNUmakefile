@@ -33,7 +33,7 @@ all: $(objs)
 	$(CC) $(CARCHFLAGS) $(CFLAGS) $(INC) $< -c -o $@
 
 debug:
-	$(CC) $(CARCHFLAGS) -D_DEBUG_SUPPORT $(DEBUGCFLAGS) $(INC) $(LDFLAGS) *.c $(LIBS) -o $(binary)
+	$(CC) $(CARCHFLAGS) -DDEBUG2 $(DEBUGCFLAGS) $(INC) $(LDFLAGS) *.c $(LIBS) -o $(binary)
 
 
 clean:
