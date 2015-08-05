@@ -1,4 +1,4 @@
-.TH FTW 3 2015-08-03 "" ""
+.TH PFTW 3 2015-08-03 "" ""
 .SH NAME
 pftw \- parallel file tree walk
 .SH SYNOPSIS
@@ -47,16 +47,12 @@ to bypass performance issues due to high latencies.
 
 .SH RETURN VALUE
 Functions
-.BR pftw_init ()
+.BR pftw_init "(), " pftw ()
 and
 .BR pftw_deinit ()
 returns 0 on success and
 .I errno
 if an error occurs.
-
-.BR pftw ()
-returns the same values as
-.BR nftw ().
 
 .SH AUTHOR
 Dmitry Yu Okunev <dyokunev@ut.mephi.ru> 0x8E30679C
