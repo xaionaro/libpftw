@@ -27,10 +27,8 @@
     
     
     RETURN VALUE
-           Functions  pftw_init() and pftw_deinit() returns 0 on success and errno
-           if an error occurs.
-    
-           pftw() returns the same values as nftw().
+           Functions  pftw_init(),  pftw() and  pftw_deinit() returns 0 on success
+           and errno if an error occurs.
     
     
     AUTHOR
