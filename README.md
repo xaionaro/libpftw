@@ -22,10 +22,6 @@
            pftw().   Argument  nopenfd  is  ignored. Some nftw(3) flags may be not
            supported.
     
-           pftw() may be useful as nftw() replacement for distributed file systems
-           (like ceph) to bypass performance issues due to high latencies.
-    
-    
     RETURN VALUE
            Functions  pftw_init(),  pftw() and  pftw_deinit() returns 0 on success
            and errno if an error occurs.
